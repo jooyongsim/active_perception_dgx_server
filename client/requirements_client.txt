@@ -1,0 +1,6 @@
+# Windows PC client deps. numpy + requests are the only hard requirements;
+# opencv-python (or pillow) is used for PNG encode/decode if present.
+requests>=2.31
+numpy>=1.24
+opencv-python>=4.9   # or: pillow>=10
+# pyrealsense2        # you already have this on the PC for capture
