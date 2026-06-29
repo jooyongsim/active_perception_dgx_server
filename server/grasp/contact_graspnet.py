@@ -22,6 +22,15 @@ import torch
 from .. import config
 from .base import Grasp, GraspBackend
 
+# numpy 2.x removed several aliases the CGN repo still uses. Restore them so the
+# vendored (pre-numpy-2) code runs unmodified on this numpy 2.4 install.
+if not hasattr(np, "in1d"):
+    np.in1d = np.isin
+for _name, _alias in (("bool", bool), ("int", int), ("float", float),
+                      ("object", object)):
+    if not hasattr(np, _name):
+        setattr(np, _name, _alias)
+
 
 class ContactGraspNet(GraspBackend):
     name = "cgn"

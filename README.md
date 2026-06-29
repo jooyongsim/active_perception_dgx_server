@@ -114,21 +114,57 @@ python example_integration.py --server http://192.168.45.150:8000 \
 
 ---
 
+## Example runs on the bundled data
+
+```bash
+python examples/run_demos.py --frame frame_000010 --prompt "the computer mouse"
+```
+Writes annotated overlays to `out/`:
+
+| file | model | status |
+|---|---|---|
+| `01_grounding_dino_boxes.png` | Grounding-DINO detection | ✅ runs |
+| `02_sam_masks.png` | SAM box-prompted masks (`gsam`) | ✅ runs |
+| `03_sam3_instances.png` | SAM 3 concept segmentation | ⚠️ needs gated HF approval |
+| `04_grasp_analytic.png` | analytic 6-DoF grasps | ✅ runs |
+| `05_grasp_cgn.png` | Contact-GraspNet grasps | ✅ runs (installed) |
+
+A backend that isn't enabled writes an instructional status card instead of
+crashing. SAM 3 is the only one still pending (manual gated approval — see below).
+Grasps render as projected parallel-jaw grippers colored by score.
+
+## Remote access (Tailscale + VSCode/SSH)
+
+See **[TAILSCALE_SETUP.md](TAILSCALE_SETUP.md)** for the full plan: install
+Tailscale on the DGX (aarch64), reach `http://spark-46e5:8000` from any network,
+SSH + VSCode Remote-SSH from your laptop, and run the server as a systemd service
+(`scripts/perception-server.service`).
+
 ## Optional backends
 
-**SAM 3** (`seg_backend="sam3"`) — single-model text/concept segmentation.
-Weights (`facebook/sam3`) are gated: on the DGX run `huggingface-cli login` and
-accept the license, then it loads on first use. Until then `/health` shows
-`sam3: loaded:false` and requests for it return an actionable error; `gsam`
-keeps working. The transformers-API seam is `server/segmentation/sam3.py`.
+**SAM 3** (`seg_backend="sam3"`) — single-model text/concept segmentation, wired
+to the native transformers SAM 3 API (`Sam3Model`/`Sam3Processor`, present in
+transformers ≥5.12). Weights (`facebook/sam3`) are **gated with manual approval**:
+1. Request access at https://huggingface.co/facebook/sam3 and **wait for Meta to
+   approve your account** (a valid token alone is not enough — an un-approved
+   account gets `403 not in the authorized list`).
+2. `huggingface-cli login` (or `export HF_TOKEN=...`) on the DGX.
+Until approved, `/health` shows `sam3: loaded:false` and requests return an
+actionable error; `gsam` keeps working.
 
-**Contact-GraspNet** (`grasp_backend="cgn"`) — learned grasps, better than the
-analytic baseline on curved/low-feature objects (like the mouse). Install:
+**Contact-GraspNet** (`grasp_backend="cgn"`) — learned grasps, **installed and
+verified** on this DGX (97 grasps on the mouse cloud; better than the analytic
+baseline on smooth objects). Install steps, if recreating:
 ```bash
 git clone https://github.com/elchun/contact_graspnet_pytorch cgn_repo
-pip install -e cgn_repo --no-deps --no-build-isolation && pip install pyrender
-export CGN_CKPT=cgn_repo/checkpoints/contact_graspnet
+pip install -e cgn_repo --no-deps --no-build-isolation
+pip install trimesh pyrender            # runtime deps (checkpoint ships in-repo)
+export CGN_CKPT=cgn_repo/checkpoints/contact_graspnet PYOPENGL_PLATFORM=egl
 ```
+The wrapper (`server/grasp/contact_graspnet.py`) includes a small numpy-2 compat
+shim (`np.in1d` etc.) so the pre-numpy-2 repo runs unmodified. `run_server.sh`
+and the systemd unit set `CGN_CKPT`/`PYOPENGL_PLATFORM` automatically when
+`cgn_repo/` is present.
 
 ---
 

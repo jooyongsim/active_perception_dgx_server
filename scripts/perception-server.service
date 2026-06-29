@@ -1,0 +1,24 @@
+[Unit]
+Description=Active-Perception Server (FastAPI, GB10 GPU)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cosmos
+WorkingDirectory=/home/cosmos/claude/01_active_perception_server
+# Bind to all interfaces (LAN + Tailscale). To restrict to the tailnet only,
+# set AP_HOST to the DGX's 100.x.y.z Tailscale IP (see TAILSCALE_SETUP.md §F).
+Environment=AP_HOST=0.0.0.0
+Environment=AP_PORT=8000
+# Contact-GraspNet backend (if installed into cgn_repo/):
+Environment=CGN_CKPT=cgn_repo/checkpoints/contact_graspnet
+Environment=PYOPENGL_PLATFORM=egl
+# Uncomment after SAM 3 gated access is granted to your HF account:
+# Environment=HF_TOKEN=hf_xxx
+ExecStart=/home/cosmos/claude/01_active_perception_server/.venv/bin/uvicorn server.app:app --host ${AP_HOST} --port ${AP_PORT}
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

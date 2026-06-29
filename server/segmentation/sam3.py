@@ -1,25 +1,20 @@
-"""SAM 3 backend — text/concept-promptable segmentation in one model.
+"""SAM 3 backend — text/concept-promptable detection + segmentation in one model.
 
-SAM 3 unifies detection + segmentation from a text concept prompt ("the mug"),
-so it replaces the Grounding-DINO -> SAM two-stage path with a single forward.
+SAM 3 takes a text concept ("the mug") and returns every matching instance's box
++ mask in a single forward, replacing the Grounding-DINO -> SAM two-stage path.
+Wired against the native `transformers` SAM 3 API (Sam3Model / Sam3Processor),
+verified present in transformers >= 5.12.
 
-Status / gating
----------------
-SAM 3 weights (`facebook/sam3`) are gated on the Hugging Face Hub. Before this
-backend can load you must, once on the DGX:
-    huggingface-cli login                       # accept the model license
-    export SAM3_MODEL=facebook/sam3             # (already the default)
-If the weights or the `transformers` SAM 3 classes are unavailable, constructing
-this backend raises a clear RuntimeError; the registry then reports `sam3` as
-unavailable in /health and `/segment?backend=sam3` returns an actionable error
-instead of crashing — `gsam` keeps working.
-
-Integration seam
-----------------
-The exact `transformers` SAM 3 processor/output field names are still settling
-across releases. The inference adapter below tries the documented interface and
-falls back across a couple of known output shapes. If your installed transformers
-exposes a different SAM 3 API, this `_run` method is the single place to adjust.
+Gating
+------
+The weights (`facebook/sam3`) are GATED ("manual" approval) on the Hugging Face
+Hub. Once, on the DGX:
+    1. Request access at https://huggingface.co/facebook/sam3 (manual approval).
+    2. `huggingface-cli login`  (paste a token from a granted account), or
+       export HF_TOKEN=hf_xxx before launching the server.
+Until then, constructing this backend raises a clear RuntimeError; the registry
+reports `sam3` unavailable in /health and `/segment?backend=sam3` returns an
+actionable error — `gsam` keeps working.
 """
 
 from __future__ import annotations
@@ -38,22 +33,21 @@ class SAM3(SegBackend):
         self.model_id = model_id or config.SAM3_MODEL
         self.device = device or config.pick_device()
         try:
-            import transformers  # noqa: F401
-            from transformers import AutoModel, AutoProcessor
-        except Exception as e:  # transformers missing entirely
-            raise RuntimeError(f"transformers unavailable for SAM 3: {e}") from e
-
+            from transformers import Sam3Model, Sam3Processor
+        except Exception as e:
+            raise RuntimeError(
+                "this transformers build has no SAM 3 (need transformers>=5.12): "
+                f"{e}") from e
         try:
-            # SAM 3 ships dedicated classes; fall back to Auto* which resolve them.
-            self.processor = AutoProcessor.from_pretrained(
-                self.model_id, trust_remote_code=True)
-            self.model = AutoModel.from_pretrained(
-                self.model_id, trust_remote_code=True).to(self.device).eval()
+            self.processor = Sam3Processor.from_pretrained(self.model_id)
+            self.model = (Sam3Model.from_pretrained(self.model_id)
+                          .to(self.device).eval())
         except Exception as e:
             raise RuntimeError(
                 f"could not load SAM 3 weights '{self.model_id}'. The model is "
-                "gated: run `huggingface-cli login` and accept the license, or "
-                f"set SAM3_MODEL to a local path. Underlying error: {e}") from e
+                "gated: request access at https://huggingface.co/facebook/sam3 "
+                "and `huggingface-cli login` (or set HF_TOKEN). Underlying error: "
+                f"{e}") from e
 
     def detect_segment(self, image: Image.Image, prompt: str,
                        box_threshold: float = 0.30,
@@ -64,39 +58,23 @@ class SAM3(SegBackend):
             inputs = self.processor(images=image, text=prompt,
                                     return_tensors="pt").to(self.device)
             outputs = self.model(**inputs)
-        return self._postprocess(outputs, image, box_threshold)
+        # SAM 3 returns one dict with scores/boxes/masks; use box_threshold as the
+        # instance score threshold (text_threshold is unused — SAM 3 has no text head).
+        results = self.processor.post_process_instance_segmentation(
+            outputs, threshold=box_threshold, mask_threshold=0.5,
+            target_sizes=[(image.size[1], image.size[0])])[0]
 
-    # --- the one method to adapt if the transformers SAM 3 API differs --------
-    def _postprocess(self, outputs, image: Image.Image,
-                     threshold: float) -> list[Detection]:
-        h, w = image.size[1], image.size[0]
-        post = getattr(self.processor, "post_process_instance_segmentation", None) \
-            or getattr(self.processor, "post_process_grounded_segmentation", None)
-        if post is None:
-            raise RuntimeError(
-                "this transformers build exposes no SAM 3 post-processor; "
-                "adjust SAM3._postprocess for your version")
-        results = post(outputs, threshold=threshold, target_sizes=[(h, w)])[0]
-
-        masks = results.get("masks")
-        scores = results.get("scores", [1.0] * (len(masks) if masks is not None else 0))
-        boxes = results.get("boxes")
-        labels = results.get("labels", ["object"] * len(scores))
-
+        scores = results["scores"]
+        boxes = results["boxes"]
+        masks = results["masks"]
         dets: list[Detection] = []
         for i in range(len(scores)):
             m = masks[i]
-            m = m.cpu().numpy() if hasattr(m, "cpu") else np.asarray(m)
-            mask = m.astype(bool)
-            if boxes is not None:
-                b = boxes[i]
-                box = [float(v) for v in (b.tolist() if hasattr(b, "tolist") else b)]
-            else:
-                ys, xs = np.where(mask)
-                box = ([float(xs.min()), float(ys.min()),
-                        float(xs.max()), float(ys.max())] if xs.size else [0, 0, 0, 0])
-            lbl = labels[i]
-            dets.append(Detection(str(lbl), float(scores[i]), box, mask))
+            mask = (m.cpu().numpy() if hasattr(m, "cpu") else np.asarray(m)).astype(bool)
+            b = boxes[i]
+            box = [float(v) for v in (b.tolist() if hasattr(b, "tolist") else b)]
+            dets.append(Detection(prompt.strip().rstrip("."),
+                                  float(scores[i]), box, mask))
         return dets
 
     def info(self) -> dict:

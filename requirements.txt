@@ -15,3 +15,6 @@ opencv-python-headless==4.13.0.92
 scipy==1.18.0
 requests==2.34.2
 # open3d            # OPTIONAL, unavailable on aarch64 — analytic grasp uses scipy fallback
+# --- Contact-GraspNet backend extras (only if using grasp_backend=cgn) -------
+# trimesh==4.12.2   # required by contact_graspnet_pytorch at import
+# pyrender==0.1.45  # imported by its data module (set PYOPENGL_PLATFORM=egl, headless)
