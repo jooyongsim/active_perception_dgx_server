@@ -125,13 +125,13 @@ Writes annotated overlays to `out/`:
 |---|---|---|
 | `01_grounding_dino_boxes.png` | Grounding-DINO detection | ✅ runs |
 | `02_sam_masks.png` | SAM box-prompted masks (`gsam`) | ✅ runs |
-| `03_sam3_instances.png` | SAM 3 concept segmentation | ⚠️ needs gated HF approval |
+| `03_sam3_instances.png` | SAM 3 concept segmentation | ✅ runs (mouse @ 0.99) |
 | `04_grasp_analytic.png` | analytic 6-DoF grasps | ✅ runs |
 | `05_grasp_cgn.png` | Contact-GraspNet grasps | ✅ runs (installed) |
 
-A backend that isn't enabled writes an instructional status card instead of
-crashing. SAM 3 is the only one still pending (manual gated approval — see below).
-Grasps render as projected parallel-jaw grippers colored by score.
+All four models run end-to-end on the data. A backend that isn't enabled writes
+an instructional status card instead of crashing. Grasps render as projected
+parallel-jaw grippers colored by score.
 
 ## Remote access (Tailscale + VSCode/SSH)
 
@@ -143,14 +143,15 @@ SSH + VSCode Remote-SSH from your laptop, and run the server as a systemd servic
 ## Optional backends
 
 **SAM 3** (`seg_backend="sam3"`) — single-model text/concept segmentation, wired
-to the native transformers SAM 3 API (`Sam3Model`/`Sam3Processor`, present in
-transformers ≥5.12). Weights (`facebook/sam3`) are **gated with manual approval**:
-1. Request access at https://huggingface.co/facebook/sam3 and **wait for Meta to
-   approve your account** (a valid token alone is not enough — an un-approved
-   account gets `403 not in the authorized list`).
-2. `huggingface-cli login` (or `export HF_TOKEN=...`) on the DGX.
-Until approved, `/health` shows `sam3: loaded:false` and requests return an
-actionable error; `gsam` keeps working.
+to the native transformers SAM 3 API (`Sam3Model`/`Sam3Processor`). **Access
+granted and verified** on this DGX (weights `facebook/sam3`, ~3.4 GB, cached in
+`~/.cache/huggingface`; mouse segmented at score 0.99 — crisper than the GSAM
+path). Notes:
+- The repo is **gated (manual approval)**: a token alone isn't enough — the HF
+  account must be approved at https://huggingface.co/facebook/sam3 (already done
+  for `jsimetri2`). An un-approved account gets `403 not in authorized list`.
+- Set `HF_TOKEN` (or `huggingface-cli login`) when launching the server so it can
+  load the gated weights; uncomment `HF_TOKEN` in the systemd unit.
 
 **Contact-GraspNet** (`grasp_backend="cgn"`) — learned grasps, **installed and
 verified** on this DGX (97 grasps on the mouse cloud; better than the analytic
